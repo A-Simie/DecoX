@@ -77,6 +77,13 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
+    externalNativeBuild {
+        cmake {
+            buildStagingDirectory "C:/DecoXBuild/.cxx"
+        }
+    }
+
+
     namespace "com.decoxapp"
     defaultConfig {
         applicationId "com.decoxapp"
