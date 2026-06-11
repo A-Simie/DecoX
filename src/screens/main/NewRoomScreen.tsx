@@ -18,6 +18,8 @@ import { typography } from '../../theme/typography';
 import { spacing, borderRadius } from '../../theme/spacing';
 import { Button } from '../../components/Button';
 import type { RootStackParamList } from '../../navigation/types';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db, auth } from '../../services/firebase';
 
 type NewRoomNav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -67,7 +69,7 @@ export function NewRoomScreen() {
     }
   };
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     if (!photoUri) {
       Alert.alert('Photo Needed', 'Please capture or select a photo of your room first.');
       return;
@@ -79,12 +81,63 @@ export function NewRoomScreen() {
 
     setIsProcessing(true);
 
-    // Simulate AI Generation time (3.5s)
-    setTimeout(() => {
+    try {
+      const formData = new FormData();
+      
+      const uriParts = photoUri.split('/');
+      const filename = uriParts[uriParts.length - 1] || 'room.jpg';
+      
+      formData.append('image', {
+        uri: photoUri,
+        type: 'image/jpeg',
+        name: filename,
+      } as any);
+      
+      formData.append('prompt', `A high-quality, professional, realistic interior design photo of the redesigned room. Preserve the structure of the room, but re-decorate and refurnish it based on the ${selectedStyle} style.`);
+      formData.append('style', selectedStyle);
+
+      console.log('Sending design request to DecoX Cloud Run service...');
+      const response = await fetch('https://decox-agent-v2-871640164960.us-central1.run.app/api/design', {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned status ${response.status}`);
+      }
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error('API reported failure.');
+      }
+
+      console.log('Design successfully generated. Saving to Firestore...');
+      const currentUser = auth.currentUser;
+      
+      const docRef = await addDoc(collection(db, 'rooms'), {
+        userId: currentUser ? currentUser.uid : 'anonymous',
+        redesigned_image_url: result.redesigned_image_url,
+        design_notes: result.design_notes,
+        items_used: result.items_used || [],
+        style: selectedStyle,
+        createdAt: serverTimestamp(),
+      });
+
+      console.log('Document written with ID: ', docRef.id);
       setIsProcessing(false);
-      // Navigate to the AI Reveal Screen
-      navigation.navigate('AIReveal', { roomId: 'room_new' });
-    }, 3500);
+      navigation.navigate('AIReveal', { roomId: docRef.id });
+
+    } catch (error: any) {
+      console.error('Error generating redesign:', error);
+      setIsProcessing(false);
+      Alert.alert(
+        'Redesign Error',
+        error.message || 'Something went wrong during generation. Please try again.'
+      );
+    }
   };
 
   if (isProcessing) {

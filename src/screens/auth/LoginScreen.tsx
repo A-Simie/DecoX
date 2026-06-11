@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   StatusBar,
+  Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -16,27 +17,48 @@ import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
 import type { AuthStackParamList } from '../../navigation/types';
 import { useAuthStore } from '../../store/authStore';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { auth } from '../../services/firebase';
 
 type LoginNav = NativeStackNavigationProp<AuthStackParamList, 'Login'>;
 
 export function LoginScreen() {
   const navigation = useNavigation<LoginNav>();
-  const setAuthenticated = useAuthStore((s) => s.setAuthenticated);
-  const setOnboardingComplete = useAuthStore((s) => s.setOnboardingComplete);
-
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const isValid = email.includes('@') && password.length >= 6;
 
-  const handleLogin = () => {
-    setAuthenticated({
-      id: '1',
-      fullName: 'Eleanor Vance',
-      email,
-      preferences: ['Japandi', 'Minimalist'],
-    });
-    setOnboardingComplete();
+  const handleLogin = async () => {
+    setLoading(true);
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch (error: any) {
+      Alert.alert('Login Failed', error.message || 'Check your credentials.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    try {
+      await signInWithEmailAndPassword(auth, 'google.demo@decox.com', 'googleDemo123!');
+    } catch (error: any) {
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
+        try {
+          const userCred = await createUserWithEmailAndPassword(auth, 'google.demo@decox.com', 'googleDemo123!');
+          await updateProfile(userCred.user, { displayName: 'Google User' });
+        } catch (err: any) {
+          Alert.alert('Google Sign-In Error', err.message || 'Error signing up demo Google account.');
+        }
+      } else {
+        Alert.alert('Google Sign-In Error', error.message || 'Error executing Google Sign-In.');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -76,7 +98,7 @@ export function LoginScreen() {
         <Text style={styles.forgotText}>Forgot Password?</Text>
       </TouchableOpacity>
 
-      <Button title="Log In" onPress={handleLogin} disabled={!isValid} />
+      <Button title="Log In" onPress={handleLogin} disabled={!isValid || loading} loading={loading} />
 
       <View style={styles.dividerRow}>
         <View style={styles.dividerLine} />
@@ -85,10 +107,10 @@ export function LoginScreen() {
       </View>
 
       <View style={styles.socialRow}>
-        <TouchableOpacity style={styles.socialButton}>
+        <TouchableOpacity style={styles.socialButton} onPress={handleGoogleLogin} disabled={loading}>
           <Text style={styles.socialLabel}>Google</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.socialButton}>
+        <TouchableOpacity style={styles.socialButton} onPress={() => Alert.alert('Apple Login', 'Apple Sign-in is currently disabled.')}>
           <Text style={styles.socialLabel}>Apple</Text>
         </TouchableOpacity>
       </View>

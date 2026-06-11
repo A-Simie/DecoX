@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   StatusBar,
+  Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -16,6 +17,8 @@ import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
 import type { AuthStackParamList } from '../../navigation/types';
 import { useAuthStore } from '../../store/authStore';
+import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { auth } from '../../services/firebase';
 
 type CreateAccountNav = NativeStackNavigationProp<AuthStackParamList, 'CreateAccount'>;
 
@@ -49,12 +52,12 @@ const strengthSegments: Record<PasswordStrength, number> = {
 
 export function CreateAccountScreen() {
   const navigation = useNavigation<CreateAccountNav>();
-  const setAuthenticated = useAuthStore((s) => s.setAuthenticated);
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const strength = useMemo(() => getPasswordStrength(password), [password]);
   const activeSegments = strengthSegments[strength];
@@ -65,15 +68,16 @@ export function CreateAccountScreen() {
     password.length >= 6 &&
     password === confirmPassword;
 
-  const handleCreateAccount = () => {
-    // Mock auth for now
-    setAuthenticated({
-      id: '1',
-      fullName,
-      email,
-      preferences: [],
-    });
-    navigation.navigate('StylePreferences');
+  const handleCreateAccount = async () => {
+    setLoading(true);
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      await updateProfile(userCredential.user, { displayName: fullName });
+    } catch (error: any) {
+      Alert.alert('Sign Up Failed', error.message || 'Please check your information.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -156,7 +160,8 @@ export function CreateAccountScreen() {
       <Button
         title="Create Account"
         onPress={handleCreateAccount}
-        disabled={!isValid}
+        disabled={!isValid || loading}
+        loading={loading}
       />
 
       <View style={styles.dividerRow}>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Modal,
   StatusBar,
   Linking,
+  ActivityIndicator,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { colors } from '../../theme/colors';
@@ -16,6 +17,8 @@ import { typography } from '../../theme/typography';
 import { spacing, borderRadius } from '../../theme/spacing';
 import { Button } from '../../components/Button';
 import type { RootStackParamList } from '../../navigation/types';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../services/firebase';
 
 type ShoppableRouteProp = RouteProp<RootStackParamList, 'ShoppableItems'>;
 
@@ -95,14 +98,80 @@ export function ShoppableItemsScreen() {
   const { roomId } = route.params;
 
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const products = itemsData[roomId] || itemsData.room_1;
+  const isMock = roomId.startsWith('room_');
+
+  useEffect(() => {
+    if (isMock) {
+      const mockProducts = itemsData[roomId] || itemsData.room_1;
+      setProducts(mockProducts);
+      setLoading(false);
+      return;
+    }
+
+    const fetchRoomItems = async () => {
+      try {
+        setLoading(true);
+        const roomDocRef = doc(db, 'rooms', roomId);
+        const roomDoc = await getDoc(roomDocRef);
+        if (roomDoc.exists()) {
+          const data = roomDoc.data();
+          const itemsUsed = data.items_used || [];
+          
+          const mapped: Product[] = itemsUsed.map((item: any, index: number) => ({
+            id: `fs_item_${index}`,
+            name: item.product_name || 'Recommended Item',
+            brand: 'Jumia Store',
+            price: 'Buy Now',
+            matchType: 'Exact Match',
+            image: item.image_url ? { uri: item.image_url } : require('../../assets/images/shoppable_chair.jpg'),
+            storeUrl: item.product_url || 'https://www.jumia.com.ng',
+            description: item.description || 'Real furniture recommended from the catalog matching your space.'
+          }));
+          
+          setProducts(mapped);
+        } else {
+          setError('Room design not found.');
+        }
+      } catch (err: any) {
+        console.error('Error fetching room items: ', err);
+        setError(err.message || 'Error loading product list');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRoomItems();
+  }, [roomId, isMock]);
 
   const handleOpenStore = (url: string) => {
     Linking.openURL(url).catch(() => {
       // Fallback
     });
   };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
+        <ActivityIndicator size="large" color={colors.secondary} />
+        <Text style={styles.loadingText}>Loading products...</Text>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.loadingContainer}>
+        <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
+        <Text style={styles.errorText}>{error}</Text>
+        <Button title="Go Back" onPress={() => navigation.goBack()} style={{ marginTop: spacing.md }} />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -159,7 +228,7 @@ export function ShoppableItemsScreen() {
                     </Text>
                   </View>
                 </View>
-                <Text style={styles.productName}>{product.name}</Text>
+                <Text style={styles.productName} numberOfLines={2}>{product.name}</Text>
                 <Text style={styles.productBrand}>{product.brand}</Text>
                 <Text style={styles.productPrice}>{product.price}</Text>
               </View>
@@ -216,6 +285,24 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xl,
+  },
+  loadingText: {
+    ...typography.titleMedium,
+    color: colors.text.primary,
+    marginTop: spacing.md,
+  },
+  errorText: {
+    ...typography.bodyLarge,
+    color: colors.status.danger,
+    marginBottom: spacing.md,
+    textAlign: 'center',
   },
   header: {
     flexDirection: 'row',

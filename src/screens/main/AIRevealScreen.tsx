@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,9 @@ import {
   Dimensions,
   Modal,
   StatusBar,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -16,6 +19,8 @@ import { typography } from '../../theme/typography';
 import { spacing, borderRadius } from '../../theme/spacing';
 import { Button } from '../../components/Button';
 import type { RootStackParamList } from '../../navigation/types';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { db } from '../../services/firebase';
 
 const { width, height } = Dimensions.get('window');
 
@@ -93,11 +98,47 @@ export function AIRevealScreen() {
 
   const [activeHotspot, setActiveHotspot] = useState<Hotspot | null>(null);
   const [isSaved, setIsSaved] = useState(false);
+  const [roomData, setRoomData] = useState<any>(null);
+  const [loading, setLoading] = useState(!roomId.startsWith('room_'));
+  const [error, setError] = useState<string | null>(null);
 
-  const hotspots = hotspotsData[roomId] || hotspotsData.room_1;
+  const isMock = roomId.startsWith('room_');
+  const hotspots = isMock ? (hotspotsData[roomId] || hotspotsData.room_1) : [];
 
-  // Render different images for each mock room
+  useEffect(() => {
+    if (isMock) {
+      setLoading(false);
+      return;
+    }
+
+    const fetchRoom = async () => {
+      try {
+        setLoading(true);
+        const roomDocRef = doc(db, 'rooms', roomId);
+        const roomDoc = await getDoc(roomDocRef);
+        if (roomDoc.exists()) {
+          const data = roomDoc.data();
+          setRoomData(data);
+          setIsSaved(!!data?.isSaved);
+        } else {
+          setError('Room design not found.');
+        }
+      } catch (err: any) {
+        console.error('Error fetching room: ', err);
+        setError(err.message || 'Error loading room data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRoom();
+  }, [roomId, isMock]);
+
+  // Render different images for each room
   const getRoomImage = () => {
+    if (!isMock && roomData?.redesigned_image_url) {
+      return { uri: roomData.redesigned_image_url };
+    }
     if (roomId === 'room_2') {
       return require('../../assets/images/recent_office.jpg');
     }
@@ -107,6 +148,39 @@ export function AIRevealScreen() {
   const handleOpenList = () => {
     navigation.navigate('ShoppableItems', { roomId });
   };
+
+  const handleToggleSave = async () => {
+    const nextSaved = !isSaved;
+    setIsSaved(nextSaved);
+    if (!isMock) {
+      try {
+        const roomDocRef = doc(db, 'rooms', roomId);
+        await updateDoc(roomDocRef, { isSaved: nextSaved });
+      } catch (err) {
+        console.error('Error toggling save:', err);
+      }
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
+        <ActivityIndicator size="large" color={colors.secondary} />
+        <Text style={styles.loadingTitle}>Loading your redesign...</Text>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.loadingContainer}>
+        <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
+        <Text style={styles.errorText}>{error}</Text>
+        <Button title="Go Back" onPress={() => navigation.goBack()} style={{ marginTop: spacing.md }} />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -122,7 +196,7 @@ export function AIRevealScreen() {
         </TouchableOpacity>
         <Text style={styles.headerTitle}>AI Redesign</Text>
         <TouchableOpacity
-          onPress={() => setIsSaved((prev) => !prev)}
+          onPress={handleToggleSave}
           style={[styles.circleBtn, isSaved && styles.circleBtnActive]}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
           <Text style={[styles.btnIcon, isSaved && styles.btnIconActive]}>
@@ -136,7 +210,7 @@ export function AIRevealScreen() {
         <Image source={getRoomImage()} style={styles.canvasImage} />
 
         {/* Hotspot Markers Overlay */}
-        {hotspots.map((spot) => (
+        {isMock && hotspots.map((spot) => (
           <TouchableOpacity
             key={spot.id}
             activeOpacity={0.8}
@@ -153,10 +227,21 @@ export function AIRevealScreen() {
 
       {/* Action Footer */}
       <View style={styles.footer}>
-        <Text style={styles.revealHeading}>Tap hotspots to explore elements</Text>
-        <Text style={styles.revealSub}>
-          {hotspots.length} shoppable items matched by AI.
+        <Text style={styles.revealHeading}>
+          {isMock ? 'Tap hotspots to explore elements' : 'Your room is ready!'}
         </Text>
+        <Text style={styles.revealSub}>
+          {isMock 
+            ? `${hotspots.length} shoppable items matched by AI.`
+            : `${roomData?.items_used?.length || 0} shoppable items matched by AI.`}
+        </Text>
+
+        {!isMock && roomData?.design_notes ? (
+          <ScrollView style={styles.notesContainer} showsVerticalScrollIndicator={true}>
+            <Text style={styles.notesText}>{roomData.design_notes}</Text>
+          </ScrollView>
+        ) : null}
+
         <Button title="View Shoppable Items List" onPress={handleOpenList} />
       </View>
 
@@ -200,6 +285,24 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000000',
+  },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xl,
+  },
+  loadingTitle: {
+    ...typography.titleMedium,
+    color: colors.text.primary,
+    marginTop: spacing.md,
+  },
+  errorText: {
+    ...typography.bodyLarge,
+    color: colors.status.danger,
+    marginBottom: spacing.md,
+    textAlign: 'center',
   },
   header: {
     position: 'absolute',
@@ -290,6 +393,18 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     textAlign: 'center',
     marginBottom: spacing.lg,
+  },
+  notesContainer: {
+    maxHeight: 120,
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  notesText: {
+    ...typography.bodyMedium,
+    color: colors.text.secondary,
+    lineHeight: 20,
   },
   modalOverlay: {
     flex: 1,

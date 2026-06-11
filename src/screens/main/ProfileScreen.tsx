@@ -12,10 +12,19 @@ import { typography } from '../../theme/typography';
 import { spacing, borderRadius } from '../../theme/spacing';
 import { useAuthStore } from '../../store/authStore';
 import { Button } from '../../components/Button';
+import { signOut } from 'firebase/auth';
+import { auth } from '../../services/firebase';
 
 export function ProfileScreen() {
   const user = useAuthStore((s) => s.user);
-  const logout = useAuthStore((s) => s.logout);
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
 
   const menuItems = [
     { id: 'edit_profile', title: 'Edit Profile', icon: '👤' },
@@ -75,7 +84,7 @@ export function ProfileScreen() {
       <Button
         title="Log Out"
         variant="secondary"
-        onPress={logout}
+        onPress={handleLogout}
         style={styles.logoutButton}
         textStyle={{ color: colors.status.danger }}
       />

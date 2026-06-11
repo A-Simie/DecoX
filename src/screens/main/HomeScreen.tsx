@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   StatusBar,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -16,27 +17,12 @@ import { typography } from '../../theme/typography';
 import { spacing, borderRadius } from '../../theme/spacing';
 import { useAuthStore } from '../../store/authStore';
 import type { RootStackParamList } from '../../navigation/types';
+import { collection, query, where, orderBy, getDocs } from 'firebase/firestore';
+import { db } from '../../services/firebase';
 
 const { width } = Dimensions.get('window');
 
 type HomeNav = NativeStackNavigationProp<RootStackParamList>;
-
-const recentScans = [
-  {
-    id: 'room_1',
-    title: 'Living Room',
-    style: 'Japandi',
-    date: '2 hours ago',
-    image: require('../../assets/images/recent_living.jpg'),
-  },
-  {
-    id: 'room_2',
-    title: 'Home Office',
-    style: 'Minimalist',
-    date: 'Yesterday',
-    image: require('../../assets/images/recent_office.jpg'),
-  },
-];
 
 const designTrends = [
   {
@@ -59,12 +45,118 @@ const designTrends = [
   },
 ];
 
+const formatRelativeTime = (timestamp: any) => {
+  if (!timestamp) return 'Just now';
+  const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return 'Yesterday';
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
+
 export function HomeScreen() {
   const navigation = useNavigation<HomeNav>();
   const user = useAuthStore((s) => s.user);
 
+  const [scans, setScans] = useState<any[]>([]);
+  const [loadingScans, setLoadingScans] = useState(true);
+
+  useEffect(() => {
+    if (!user || !user.id) {
+      setScans([
+        {
+          id: 'room_1',
+          title: 'Living Room',
+          style: 'Japandi',
+          date: '2 hours ago',
+          image: require('../../assets/images/recent_living.jpg'),
+        },
+        {
+          id: 'room_2',
+          title: 'Home Office',
+          style: 'Minimalist',
+          date: 'Yesterday',
+          image: require('../../assets/images/recent_office.jpg'),
+        },
+      ]);
+      setLoadingScans(false);
+      return;
+    }
+
+    const fetchScans = async () => {
+      try {
+        setLoadingScans(true);
+        const q = query(
+          collection(db, 'rooms'),
+          where('userId', '==', user.id),
+          orderBy('createdAt', 'desc')
+        );
+        const querySnapshot = await getDocs(q);
+        const loaded: any[] = [];
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          loaded.push({
+            id: doc.id,
+            title: (data.style ? data.style.charAt(0).toUpperCase() + data.style.slice(1) : 'Redesign') + ' Room',
+            style: data.style ? data.style.charAt(0).toUpperCase() + data.style.slice(1) : 'Modern',
+            date: formatRelativeTime(data.createdAt),
+            image: data.redesigned_image_url ? { uri: data.redesigned_image_url } : require('../../assets/images/recent_living.jpg'),
+          });
+        });
+
+        if (loaded.length === 0) {
+          setScans([
+            {
+              id: 'room_1',
+              title: 'Living Room',
+              style: 'Japandi',
+              date: '2 hours ago',
+              image: require('../../assets/images/recent_living.jpg'),
+            },
+            {
+              id: 'room_2',
+              title: 'Home Office',
+              style: 'Minimalist',
+              date: 'Yesterday',
+              image: require('../../assets/images/recent_office.jpg'),
+            },
+          ]);
+        } else {
+          setScans(loaded);
+        }
+      } catch (error) {
+        console.error('Error fetching recent scans:', error);
+        setScans([
+          {
+            id: 'room_1',
+            title: 'Living Room',
+            style: 'Japandi',
+            date: '2 hours ago',
+            image: require('../../assets/images/recent_living.jpg'),
+          },
+          {
+            id: 'room_2',
+            title: 'Home Office',
+            style: 'Minimalist',
+            date: 'Yesterday',
+            image: require('../../assets/images/recent_office.jpg'),
+          },
+        ]);
+      } finally {
+        setLoadingScans(false);
+      }
+    };
+
+    fetchScans();
+  }, [user]);
+
   const handleStartRedesign = () => {
-    // Navigation helper to switch tab
     navigation.navigate('MainTabs', { screen: 'NewRoom' });
   };
 
@@ -113,26 +205,32 @@ export function HomeScreen() {
       {/* Recent Redesigns */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Recent Redesigns</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.horizontalScroll}>
-          {recentScans.map((scan) => (
-            <TouchableOpacity
-              key={scan.id}
-              activeOpacity={0.85}
-              onPress={() => handleOpenReveal(scan.id)}
-              style={styles.scanCard}>
-              <Image source={scan.image} style={styles.scanImage} />
-              <View style={styles.scanInfo}>
-                <Text style={styles.scanTitle}>{scan.title}</Text>
-                <Text style={styles.scanDetails}>
-                  {scan.style} • {scan.date}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        {loadingScans ? (
+          <View style={styles.loaderContainer}>
+            <ActivityIndicator size="small" color={colors.secondary} />
+          </View>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.horizontalScroll}>
+            {scans.map((scan) => (
+              <TouchableOpacity
+                key={scan.id}
+                activeOpacity={0.85}
+                onPress={() => handleOpenReveal(scan.id)}
+                style={styles.scanCard}>
+                <Image source={scan.image} style={styles.scanImage} />
+                <View style={styles.scanInfo}>
+                  <Text style={styles.scanTitle}>{scan.title}</Text>
+                  <Text style={styles.scanDetails}>
+                    {scan.style} • {scan.date}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
       </View>
 
       {/* Design Trends */}
@@ -215,7 +313,11 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   ctaOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.25)',
     padding: spacing.lg,
     justifyContent: 'flex-end',
@@ -242,6 +344,11 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
     paddingHorizontal: spacing.lg,
     marginBottom: spacing.md,
+  },
+  loaderContainer: {
+    paddingVertical: spacing.xl,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   horizontalScroll: {
     paddingHorizontal: spacing.lg,
@@ -285,7 +392,11 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   trendOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
     padding: spacing.lg,
     justifyContent: 'flex-end',
